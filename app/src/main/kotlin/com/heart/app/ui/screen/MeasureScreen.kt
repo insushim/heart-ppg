@@ -11,9 +11,7 @@ import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
@@ -84,7 +82,6 @@ fun MeasureScreen(onResult: (MeasurementResult) -> Unit, onCancel: () -> Unit) {
         if (ui.phase == MeasurePhase.RESULT && r != null) onResult(r)
     }
 
-    val previewView = remember { PreviewView(context) }
     val cameraHolder = remember { mutableStateOf<Camera?>(null) }
 
     if (granted) {
@@ -95,24 +92,30 @@ fun MeasureScreen(onResult: (MeasurementResult) -> Unit, onCancel: () -> Unit) {
             // future.get() on the main thread at dispose time (4-way review: ANR risk).
             var boundProvider: ProcessCameraProvider? = null
             future.addListener({
-                val provider = future.get()
-                boundProvider = provider
-                val preview = Preview.Builder().build().also {
-                    it.setSurfaceProvider(previewView.surfaceProvider)
-                }
-                val analysis = ImageAnalysis.Builder()
-                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
-                analysis.setAnalyzer(executor, RedChannelAnalyzer(vm::onSample))
-
                 runCatching {
+                    val provider = future.get()
+                    boundProvider = provider
+                    // Bind ONLY ImageAnalysis (no Preview): analysis owns its own surface,
+                    // the torch works, and we avoid the unattached-PreviewView stall that
+                    // can block the camera stream on some devices.
+                    val analysis = ImageAnalysis.Builder()
+                        .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .build()
+                    analysis.setAnalyzer(executor, RedChannelAnalyzer(vm::onSample))
+
                     provider.unbindAll()
                     val camera = provider.bindToLifecycle(
-                        lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis,
+                        lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, analysis,
                     )
-                    camera.cameraControl.enableTorch(true)
                     cameraHolder.value = camera
+                    if (camera.cameraInfo.hasFlashUnit()) {
+                        camera.cameraControl.enableTorch(true)
+                    } else {
+                        vm.reportError("이 기기 카메라에 플래시가 없어 측정할 수 없습니다.")
+                    }
+                }.onFailure {
+                    vm.reportError("카메라 시작 실패: ${it.message ?: it.javaClass.simpleName}")
                 }
             }, ContextCompat.getMainExecutor(context))
 
@@ -201,7 +204,20 @@ fun MeasureScreen(onResult: (MeasurementResult) -> Unit, onCancel: () -> Unit) {
             else MaterialTheme.colorScheme.onSurface,
         )
 
-        Spacer(Modifier.height(20.dp))
+        ui.error?.let { err ->
+            Spacer(Modifier.height(12.dp))
+            Text("⚠ $err", fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+        }
+
+        // Diagnostic readout (debug build): frames received + current red brightness.
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "프레임 ${ui.frames} · 밝기 ${ui.lastRed.toInt()}/255 · 손가락 ${if (ui.fingerPresent) "감지" else "미감지"}",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Spacer(Modifier.height(16.dp))
         WaveformView(values = ui.waveform)
 
         Spacer(Modifier.height(24.dp))

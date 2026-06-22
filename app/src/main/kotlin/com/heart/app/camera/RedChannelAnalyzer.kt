@@ -51,8 +51,10 @@ class RedChannelAnalyzer(
             }
 
             val meanR = if (count > 0) sumR.toDouble() / count else 0.0
-            // Finger present ⇒ bright red but not fully saturated white.
-            val present = meanR in 90.0..252.0
+            // Finger present ⇒ the torch-lit fingertip makes the red channel bright.
+            // No upper cap: a tightly pressed finger can saturate red near 255, which
+            // must still count as "present" (earlier 252 cap wrongly rejected it).
+            val present = meanR > 60.0
             val tMs = image.imageInfo.timestamp / 1_000_000L
             onSample(tMs, meanR, present)
         } catch (_: Throwable) {

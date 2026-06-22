@@ -25,6 +25,11 @@ data class MeasureUiState(
     val waveform: List<Float> = emptyList(),
     val result: MeasurementResult? = null,
     val insufficientReason: String? = null,
+    // Diagnostics (visible on screen) — frames seen, latest red intensity, camera error.
+    val frames: Int = 0,
+    val lastRed: Double = 0.0,
+    val fingerPresent: Boolean = false,
+    val error: String? = null,
 )
 
 /**
@@ -50,9 +55,17 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
     private var phaseStartMs = 0L
     private var measureStartMs = 0L
     private var analysisJob: Job? = null
+    private var frameCount = 0
+    private var lastRed = 0.0
+    private var lastPresent = false
     // Monotonic session id: bumped on reset so a late-finishing analysis from a previous
     // session cannot overwrite the new state (4-way review: reset/analysis race).
     private val session = AtomicInteger(0)
+
+    /** Surface a camera setup failure to the UI instead of failing silently. */
+    fun reportError(message: String) {
+        _state.value = _state.value.copy(error = message)
+    }
 
     fun reset() {
         synchronized(lock) {
@@ -63,6 +76,9 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
             wave.clear()
             phaseStartMs = 0L
             measureStartMs = 0L
+            frameCount = 0
+            lastRed = 0.0
+            lastPresent = false
             // Assign state inside the lock so a concurrent onSample can't observe a
             // half-reset (cleared fields but stale phase) — local-validator C1.
             _state.value = MeasureUiState()
@@ -79,6 +95,10 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
                 phase == MeasurePhase.INSUFFICIENT
             ) return
 
+            frameCount++
+            lastRed = red
+            lastPresent = fingerPresent
+
             when (phase) {
                 MeasurePhase.WAITING_FINGER -> {
                     if (fingerPresent) {
@@ -87,8 +107,11 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
                         samples.add(PpgSample(tMs, red))
                         pushWave(red)
                         emit(MeasurePhase.WARMUP, 0f)
+                    } else {
+                        // Emit lightweight diagnostics so the user can see frames/brightness
+                        // even before a finger is detected (remote debugging).
+                        emit(MeasurePhase.WAITING_FINGER, 0f)
                     }
-                    // No finger: stay silent (no per-frame emit ⇒ no recomposition churn).
                 }
                 MeasurePhase.WARMUP -> {
                     if (!fingerPresent) {
@@ -178,6 +201,9 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
             phase = phase,
             progress = progress,
             waveform = wave.toList(),
+            frames = frameCount,
+            lastRed = lastRed,
+            fingerPresent = lastPresent,
         )
     }
 }
