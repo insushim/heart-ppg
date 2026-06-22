@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">Heart</string>
+
+    <!-- Disclaimers (4-way review: must be visible on-screen, not buried). -->
+    <string name="disclaimer_short">참고용 웰니스 기능입니다. 의료 진단·치료·예방용이 아닙니다.</string>
+    <string name="disclaimer_full">본 앱은 스마트폰 카메라로 추정한 참고용 수치를 제공합니다. 의료기기가 아니며 질병의 진단·치료·예방 목적으로 사용할 수 없습니다. 측정값은 기기·조명·피부 상태에 따라 오차가 있을 수 있습니다. 건강 이상이 의심되면 반드시 전문의와 상담하세요.</string>
+
+    <string name="measure_guide">손가락 끝으로 후면 카메라와 플래시를 완전히 덮고 가만히 유지하세요.</string>
+    <string name="measure_finger_missing">손가락을 카메라에 밀착해 주세요.</string>
+    <string name="measure_warmup">노출 안정화 중…</string>
+    <string name="measure_measuring">측정 중… 움직이지 마세요.</string>
+
+    <string name="result_irregular">불규칙한 맥박 신호가 감지되었습니다. 진단이 아니며, 지속되면 전문의 상담을 권합니다.</string>
+    <string name="result_low_quality">신호 품질이 낮습니다. 다시 측정해 주세요.</string>
+</resources>
