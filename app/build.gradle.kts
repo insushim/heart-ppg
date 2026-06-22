@@ -12,9 +12,21 @@ android {
         applicationId = "com.heart.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.1.2"
+        versionCode = 4
+        versionName = "0.1.3"
         vectorDrawables { useSupportLibrary = true }
+    }
+
+    signingConfigs {
+        // Stable key committed to the repo so every CI build shares one signature →
+        // installs update in place (no uninstall) and in-app updates work. This is a
+        // sideload/debug key, NOT a production upload key.
+        create("stable") {
+            storeFile = file("../keystore/heart.keystore")
+            storePassword = "heartapp"
+            keyAlias = "heart"
+            keyPassword = "heartapp"
+        }
     }
 
     buildTypes {
@@ -22,6 +34,7 @@ android {
             isMinifyEnabled = false
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            signingConfig = signingConfigs.getByName("stable")
         }
         release {
             isMinifyEnabled = false
