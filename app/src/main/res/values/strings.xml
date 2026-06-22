@@ -5,7 +5,7 @@
     <string name="disclaimer_short">참고용 웰니스 기능입니다. 의료 진단·치료·예방용이 아닙니다.</string>
     <string name="disclaimer_full">본 앱은 스마트폰 카메라로 추정한 참고용 수치를 제공합니다. 의료기기가 아니며 질병의 진단·치료·예방 목적으로 사용할 수 없습니다. 측정값은 기기·조명·피부 상태에 따라 오차가 있을 수 있습니다. 건강 이상이 의심되면 반드시 전문의와 상담하세요.</string>
 
-    <string name="measure_guide">손가락 끝으로 후면 카메라와 플래시를 완전히 덮고 가만히 유지하세요.</string>
+    <string name="measure_guide">후면 카메라 렌즈를 손가락 끝(지문 면)으로 덮으세요. 보통 렌즈 바로 옆에 플래시가 있어 한 손가락으로 같이 덮입니다. 측정 내내 가만히 유지하세요.</string>
     <string name="measure_finger_missing">손가락을 카메라에 밀착해 주세요.</string>
     <string name="measure_warmup">노출 안정화 중…</string>
     <string name="measure_measuring">측정 중… 움직이지 마세요.</string>

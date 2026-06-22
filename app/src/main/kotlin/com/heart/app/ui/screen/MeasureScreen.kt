@@ -11,7 +11,10 @@ import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
@@ -35,9 +38,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -83,6 +90,9 @@ fun MeasureScreen(onResult: (MeasurementResult) -> Unit, onCancel: () -> Unit) {
     }
 
     val cameraHolder = remember { mutableStateOf<Camera?>(null) }
+    val previewView = remember {
+        PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER }
+    }
 
     if (granted) {
         DisposableEffect(lifecycleOwner) {
@@ -95,19 +105,28 @@ fun MeasureScreen(onResult: (MeasurementResult) -> Unit, onCancel: () -> Unit) {
                 runCatching {
                     val provider = future.get()
                     boundProvider = provider
-                    // Bind ONLY ImageAnalysis (no Preview): analysis owns its own surface,
-                    // the torch works, and we avoid the unattached-PreviewView stall that
-                    // can block the camera stream on some devices.
                     val analysis = ImageAnalysis.Builder()
                         .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build()
                     analysis.setAnalyzer(executor, RedChannelAnalyzer(vm::onSample))
+                    val preview = Preview.Builder().build().also {
+                        it.setSurfaceProvider(previewView.surfaceProvider)
+                    }
 
                     provider.unbindAll()
-                    val camera = provider.bindToLifecycle(
-                        lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, analysis,
-                    )
+                    // Prefer Preview + Analysis (so the user sees the lens), but fall back
+                    // to analysis-only if a device can't bind both.
+                    val camera = runCatching {
+                        provider.bindToLifecycle(
+                            lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis,
+                        )
+                    }.getOrElse {
+                        provider.unbindAll()
+                        provider.bindToLifecycle(
+                            lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, analysis,
+                        )
+                    }
                     cameraHolder.value = camera
                     if (camera.cameraInfo.hasFlashUnit()) {
                         camera.cameraControl.enableTorch(true)
@@ -166,8 +185,24 @@ fun MeasureScreen(onResult: (MeasurementResult) -> Unit, onCancel: () -> Unit) {
 
         Text(stringResource(R.string.measure_guide), fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(20.dp))
 
+        // Live camera preview so the user can confirm the lens is covered.
+        Spacer(Modifier.height(14.dp))
+        Box(
+            modifier = Modifier
+                .size(150.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            AndroidView(factory = { previewView }, modifier = Modifier.fillMaxWidth())
+        }
+        Text(
+            "이 화면이 붉게/밝게 꽉 차면 잘 덮인 것입니다.",
+            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Spacer(Modifier.height(18.dp))
         Box(contentAlignment = Alignment.Center, modifier = Modifier.size(160.dp)) {
             val progress = ui.progress
             if (ui.phase == MeasurePhase.MEASURING || ui.phase == MeasurePhase.ANALYZING) {

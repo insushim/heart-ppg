@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import com.heart.app.R
 import com.heart.app.ui.AutonomicLight
 import com.heart.app.ui.DisclaimerCard
+import com.heart.app.ui.Interpretation
 import com.heart.app.ui.MetricRow
 import com.heart.core.model.MeasurementResult
 import com.heart.core.model.SignalQuality
@@ -55,8 +56,22 @@ fun ResultScreen(result: MeasurementResult, onDone: () -> Unit, onRemeasure: () 
                     fontSize = 64.sp, fontWeight = FontWeight.Bold,
                 )
                 Text("bpm", color = MaterialTheme.colorScheme.onPrimary, fontSize = 16.sp)
-                Text(qualityLabel(result.quality), color = MaterialTheme.colorScheme.onPrimary, fontSize = 12.sp)
+                Text(Interpretation.qualityLabel(result.quality), color = MaterialTheme.colorScheme.onPrimary, fontSize = 12.sp)
             }
+        }
+
+        // Overall takeaway.
+        Spacer(Modifier.height(12.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            Text(
+                Interpretation.overall(result),
+                modifier = Modifier.padding(14.dp),
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         if (result.quality == SignalQuality.POOR) {
@@ -85,6 +100,16 @@ fun ResultScreen(result: MeasurementResult, onDone: () -> Unit, onRemeasure: () 
         MetricRow("신호 SNR", String.format("%.1f dB", result.snrDb))
         HorizontalDivider()
 
+        // Detailed interpretation.
+        Spacer(Modifier.height(20.dp))
+        Text("📋 상세 해석", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+        Spacer(Modifier.height(8.dp))
+        InterpretRow("심박수", Interpretation.heartRate(result.bpm))
+        InterpretRow("심박변이도", Interpretation.rmssd(result.rmssdMs))
+        InterpretRow("자율신경", Interpretation.autonomic(result.autonomic))
+        InterpretRow("관류지수", Interpretation.perfusion(result.perfusionIndex))
+        InterpretRow("호흡수", Interpretation.respiration(result.respirationBpm))
+
         Spacer(Modifier.height(16.dp))
         DisclaimerCard(stringResource(R.string.disclaimer_full))
 
@@ -111,8 +136,11 @@ private fun WarnCard(text: String) {
     }
 }
 
-private fun qualityLabel(q: SignalQuality): String = when (q) {
-    SignalQuality.GOOD -> "신호 양호"
-    SignalQuality.FAIR -> "신호 보통"
-    SignalQuality.POOR -> "신호 미흡 — 재측정 권장"
+@Composable
+private fun InterpretRow(label: String, text: String) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary)
+        Text(text, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+    }
 }
