@@ -10,8 +10,11 @@ import com.heart.core.model.MeasurementResult
 import com.heart.core.model.PpgSample
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -48,6 +51,12 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _state = MutableStateFlow(MeasureUiState())
     val state: StateFlow<MeasureUiState> = _state.asStateFlow()
+
+    // One-shot navigation event: emitted once when a measurement finishes. Using an
+    // event (not the RESULT state) prevents re-entering the measure screen from
+    // immediately bouncing back to a stale previous result.
+    private val _completed = MutableSharedFlow<MeasurementResult>(extraBufferCapacity = 1)
+    val completed: SharedFlow<MeasurementResult> = _completed.asSharedFlow()
 
     private val lock = Any()
     private val samples = ArrayList<PpgSample>(2048)
@@ -168,6 +177,7 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
                         _state.value = _state.value.copy(
                             phase = MeasurePhase.RESULT, progress = 1f, result = analysis.result,
                         )
+                        _completed.tryEmit(analysis.result)
                     }
                 }
                 is PpgAnalyzer.Analysis.Insufficient -> {

@@ -82,11 +82,9 @@ fun MeasureScreen(onResult: (MeasurementResult) -> Unit, onCancel: () -> Unit) {
     LaunchedEffect(Unit) {
         vm.reset()
         if (!granted) permLauncher.launch(Manifest.permission.CAMERA)
-    }
-
-    LaunchedEffect(ui.phase, ui.result) {
-        val r = ui.result
-        if (ui.phase == MeasurePhase.RESULT && r != null) onResult(r)
+        // Navigate on the one-shot completion event, never on stale RESULT state —
+        // fixes the "first 다시 측정 tap bounces back" bug.
+        vm.completed.collect { onResult(it) }
     }
 
     val cameraHolder = remember { mutableStateOf<Camera?>(null) }
