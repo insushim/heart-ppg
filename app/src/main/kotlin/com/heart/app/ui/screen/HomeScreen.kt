@@ -34,7 +34,10 @@ fun HomeScreen(onMeasure: () -> Unit, onHistory: () -> Unit) {
         Text("Heart", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         Text("카메라로 심박·컨디션 측정", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(16.dp))
+        com.heart.app.update.UpdateBanner()
+
+        Spacer(Modifier.height(16.dp))
         DisclaimerCard(stringResource(R.string.disclaimer_full))
 
         Spacer(Modifier.height(24.dp))
