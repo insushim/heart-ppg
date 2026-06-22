@@ -38,6 +38,7 @@ fun UpdateBanner() {
     var update by remember { mutableStateOf<UpdateInfo?>(null) }
     var downloading by remember { mutableStateOf(false) }
     var progress by remember { mutableIntStateOf(0) }
+    var message by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         val latest = Updater.fetchLatest() ?: return@LaunchedEffect
@@ -57,6 +58,10 @@ fun UpdateBanner() {
                 fontSize = 12.sp, color = MaterialTheme.colorScheme.onSecondaryContainer,
             )
             Spacer(Modifier.height(10.dp))
+            message?.let {
+                Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                Spacer(Modifier.height(8.dp))
+            }
             if (downloading) {
                 LinearProgressIndicator(
                     progress = { progress / 100f },
@@ -67,13 +72,22 @@ fun UpdateBanner() {
                 Button(
                     onClick = {
                         downloading = true
+                        message = null
+                        progress = 0
                         scope.launch {
-                            Updater.downloadAndInstall(context, info.apkUrl) { progress = it }
-                                .onFailure { downloading = false }
+                            when (val r = Updater.downloadAndInstall(context, info.apkUrl) { progress = it }) {
+                                is InstallResult.Launched ->
+                                    message = "설치 화면이 열렸습니다. ‘설치’를 눌러 완료하세요."
+                                is InstallResult.NeedsPermission ->
+                                    message = "‘이 출처 허용’을 켠 뒤 다시 ‘지금 업데이트’를 눌러주세요."
+                                is InstallResult.Failed ->
+                                    message = r.message
+                            }
+                            downloading = false
                         }
                     },
                     modifier = Modifier.fillMaxWidth().height(44.dp),
-                ) { Text("지금 업데이트") }
+                ) { Text(if (message == null) "지금 업데이트" else "다시 시도") }
             }
         }
     }
