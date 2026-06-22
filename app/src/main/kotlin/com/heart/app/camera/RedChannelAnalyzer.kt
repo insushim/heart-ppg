@@ -16,11 +16,9 @@ class RedChannelAnalyzer(
 
     override fun analyze(image: ImageProxy) {
         try {
-            if (image.format != android.graphics.ImageFormat.FLEX_RGBA_8888 &&
-                image.planes.isEmpty()
-            ) {
-                return
-            }
+            // ImageAnalysis is configured for RGBA_8888 output, so plane[0] is packed RGBA.
+            // Guard only against an unexpectedly empty plane list.
+            if (image.planes.isEmpty()) return
             val plane = image.planes[0]
             val buffer = plane.buffer
             val rowStride = plane.rowStride

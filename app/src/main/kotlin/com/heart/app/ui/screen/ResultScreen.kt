@@ -13,7 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -74,7 +74,7 @@ fun ResultScreen(result: MeasurementResult, onDone: () -> Unit, onRemeasure: () 
         AutonomicLight(result.autonomic)
 
         Spacer(Modifier.height(16.dp))
-        Divider()
+        HorizontalDivider()
         MetricRow("심박변이도 (RMSSD)", "${result.rmssdMs.toInt()} ms")
         MetricRow("SDNN", "${result.sdnnMs.toInt()} ms")
         MetricRow("pNN50", "${(result.pnn50 * 100).toInt()} %")
@@ -83,7 +83,7 @@ fun ResultScreen(result: MeasurementResult, onDone: () -> Unit, onRemeasure: () 
             MetricRow("호흡수", "${it.toInt()} 회/분", hint = "안정 시 추정")
         }
         MetricRow("신호 SNR", String.format("%.1f dB", result.snrDb))
-        Divider()
+        HorizontalDivider()
 
         Spacer(Modifier.height(16.dp))
         DisclaimerCard(stringResource(R.string.disclaimer_full))

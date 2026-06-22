@@ -5,14 +5,17 @@ import android.content.pm.PackageManager
 import android.hardware.camera2.CaptureRequest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.Camera2CameraControl
+import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -82,25 +85,25 @@ fun MeasureScreen(onResult: (MeasurementResult) -> Unit, onCancel: () -> Unit) {
     }
 
     val previewView = remember { PreviewView(context) }
+    val cameraHolder = remember { mutableStateOf<Camera?>(null) }
 
     if (granted) {
         DisposableEffect(lifecycleOwner) {
             val executor = Executors.newSingleThreadExecutor()
             val future = ProcessCameraProvider.getInstance(context)
+            // Captured by the listener (write) and onDispose (read) — avoids a blocking
+            // future.get() on the main thread at dispose time (4-way review: ANR risk).
+            var boundProvider: ProcessCameraProvider? = null
             future.addListener({
                 val provider = future.get()
+                boundProvider = provider
                 val preview = Preview.Builder().build().also {
                     it.setSurfaceProvider(previewView.surfaceProvider)
                 }
-                val analysisBuilder = ImageAnalysis.Builder()
+                val analysis = ImageAnalysis.Builder()
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                // Lock exposure & white balance so the pulsatile signal isn't masked by
-                // the camera's auto-adjustments (4-way review: AE/AWB lock required).
-                Camera2Interop.Extender(analysisBuilder)
-                    .setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, true)
-                    .setCaptureRequestOption(CaptureRequest.CONTROL_AWB_LOCK, true)
-                val analysis = analysisBuilder.build()
+                    .build()
                 analysis.setAnalyzer(executor, RedChannelAnalyzer(vm::onSample))
 
                 runCatching {
@@ -109,18 +112,38 @@ fun MeasureScreen(onResult: (MeasurementResult) -> Unit, onCancel: () -> Unit) {
                         lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis,
                     )
                     camera.cameraControl.enableTorch(true)
+                    cameraHolder.value = camera
                 }
             }, ContextCompat.getMainExecutor(context))
 
             onDispose {
-                runCatching { future.get().unbindAll() }
+                boundProvider?.let { runCatching { it.unbindAll() } }
+                cameraHolder.value = null
                 executor.shutdown()
+            }
+        }
+
+        // Lock exposure & white balance only AFTER warm-up, once auto-exposure has
+        // converged on the torch-lit fingertip (4-way review: don't lock too early).
+        LaunchedEffect(ui.phase, cameraHolder.value) {
+            val cam = cameraHolder.value
+            if (cam != null && ui.phase == MeasurePhase.MEASURING) {
+                runCatching {
+                    Camera2CameraControl.from(cam.cameraControl).captureRequestOptions =
+                        CaptureRequestOptions.Builder()
+                            .setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, true)
+                            .setCaptureRequestOption(CaptureRequest.CONTROL_AWB_LOCK, true)
+                            .build()
+                }
             }
         }
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(20.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text("측정", fontSize = 22.sp, fontWeight = FontWeight.Bold)

@@ -10,10 +10,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -59,7 +60,7 @@ fun HistoryScreen(onBack: () -> Unit) {
             LazyColumn(modifier = Modifier.weight(1f)) {
                 items(items) { e ->
                     HistoryRow(e, fmt.format(Date(e.timestamp)))
-                    Divider()
+                    HorizontalDivider()
                 }
             }
         }
@@ -91,7 +92,6 @@ private fun HistoryRow(e: MeasurementEntity, dateText: String) {
             }
             Text("HRV ${e.rmssdMs.toInt()}ms", fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(0.dp))
             Box(Modifier.padding(start = 10.dp).size(14.dp).clip(CircleShape).background(color))
         }
     }

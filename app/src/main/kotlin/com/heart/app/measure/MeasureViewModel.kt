@@ -9,10 +9,13 @@ import com.heart.core.PpgAnalyzer
 import com.heart.core.model.MeasurementResult
 import com.heart.core.model.PpgSample
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
 
 enum class MeasurePhase { WAITING_FINGER, WARMUP, MEASURING, ANALYZING, RESULT, INSUFFICIENT }
 
@@ -46,30 +49,35 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
     private val wave = ArrayDeque<Float>(WAVE_LEN)
     private var phaseStartMs = 0L
     private var measureStartMs = 0L
-    private var analyzing = false
+    private var analysisJob: Job? = null
+    // Monotonic session id: bumped on reset so a late-finishing analysis from a previous
+    // session cannot overwrite the new state (4-way review: reset/analysis race).
+    private val session = AtomicInteger(0)
 
     fun reset() {
         synchronized(lock) {
+            session.incrementAndGet()
+            analysisJob?.cancel()
+            analysisJob = null
             samples.clear()
             wave.clear()
-            analyzing = false
             phaseStartMs = 0L
             measureStartMs = 0L
+            // Assign state inside the lock so a concurrent onSample can't observe a
+            // half-reset (cleared fields but stale phase) — local-validator C1.
+            _state.value = MeasureUiState()
         }
-        _state.value = MeasureUiState()
     }
 
     /** Called from the camera analyzer thread for every frame. */
     fun onSample(tMs: Long, red: Double, fingerPresent: Boolean) {
-        var startAnalysis = false
         var snapshot: List<PpgSample>? = null
+        var snapshotSession = -1
         synchronized(lock) {
             val phase = _state.value.phase
             if (phase == MeasurePhase.ANALYZING || phase == MeasurePhase.RESULT ||
                 phase == MeasurePhase.INSUFFICIENT
             ) return
-
-            pushWave(red)
 
             when (phase) {
                 MeasurePhase.WAITING_FINGER -> {
@@ -77,17 +85,20 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
                         samples.clear()
                         phaseStartMs = tMs
                         samples.add(PpgSample(tMs, red))
+                        pushWave(red)
                         emit(MeasurePhase.WARMUP, 0f)
-                    } else {
-                        emit(MeasurePhase.WAITING_FINGER, 0f)
                     }
+                    // No finger: stay silent (no per-frame emit ⇒ no recomposition churn).
                 }
                 MeasurePhase.WARMUP -> {
                     if (!fingerPresent) {
                         samples.clear()
                         emit(MeasurePhase.WAITING_FINGER, 0f)
                     } else {
+                        // Keep warmup samples: the core (PpgAnalyzer) trims its own 2 s
+                        // warmup, so feeding warmup+measure yields the intended window.
                         samples.add(PpgSample(tMs, red))
+                        pushWave(red)
                         if (tMs - phaseStartMs >= WARMUP_MS) {
                             measureStartMs = tMs
                             emit(MeasurePhase.MEASURING, 0f)
@@ -103,12 +114,12 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
                         emit(MeasurePhase.WAITING_FINGER, 0f)
                     } else {
                         samples.add(PpgSample(tMs, red))
+                        pushWave(red)
                         val elapsed = tMs - measureStartMs
                         val p = (elapsed.toFloat() / MEASURE_MS).coerceIn(0f, 1f)
                         if (elapsed >= MEASURE_MS) {
-                            analyzing = true
-                            startAnalysis = true
                             snapshot = ArrayList(samples)
+                            snapshotSession = session.get()
                             emit(MeasurePhase.ANALYZING, 1f)
                         } else {
                             emit(MeasurePhase.MEASURING, p)
@@ -119,34 +130,39 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
-        if (startAnalysis && snapshot != null) runAnalysis(snapshot!!)
+        val data = snapshot
+        if (data != null) runAnalysis(data, snapshotSession)
     }
 
-    private fun runAnalysis(data: List<PpgSample>) {
-        viewModelScope.launch(Dispatchers.Default) {
-            when (val a = PpgAnalyzer.analyze(data)) {
+    private fun runAnalysis(data: List<PpgSample>, forSession: Int) {
+        analysisJob = viewModelScope.launch(Dispatchers.Default) {
+            val analysis = PpgAnalyzer.analyze(data)
+            if (forSession != session.get()) return@launch // superseded by a reset
+            when (analysis) {
                 is PpgAnalyzer.Analysis.Ok -> {
-                    persist(a.result)
-                    _state.value = _state.value.copy(
-                        phase = MeasurePhase.RESULT,
-                        progress = 1f,
-                        result = a.result,
-                    )
+                    persist(analysis.result)
+                    if (forSession == session.get()) {
+                        _state.value = _state.value.copy(
+                            phase = MeasurePhase.RESULT, progress = 1f, result = analysis.result,
+                        )
+                    }
                 }
                 is PpgAnalyzer.Analysis.Insufficient -> {
-                    _state.value = _state.value.copy(
-                        phase = MeasurePhase.INSUFFICIENT,
-                        insufficientReason = a.reason,
-                    )
+                    if (forSession == session.get()) {
+                        _state.value = _state.value.copy(
+                            phase = MeasurePhase.INSUFFICIENT, insufficientReason = analysis.reason,
+                        )
+                    }
                 }
             }
         }
     }
 
-    private fun persist(result: MeasurementResult) {
+    private suspend fun persist(result: MeasurementResult) {
         val dao = (getApplication<Application>() as HeartApp).database.measurementDao()
-        viewModelScope.launch(Dispatchers.IO) {
+        withContext(Dispatchers.IO) {
             runCatching { dao.insert(result.toEntity(System.currentTimeMillis())) }
+                .onFailure { android.util.Log.w("Heart", "측정 저장 실패", it) }
         }
     }
 
