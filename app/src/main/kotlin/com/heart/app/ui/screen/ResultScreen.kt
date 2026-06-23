@@ -98,6 +98,9 @@ fun ResultScreen(result: MeasurementResult, onDone: () -> Unit, onRemeasure: () 
             MetricRow("호흡수", "${it.toInt()} 회/분", hint = "안정 시 추정")
         }
         MetricRow("신호 SNR", String.format("%.1f dB", result.snrDb))
+        MetricRow("측정 채널", if (result.channel == "GREEN") "초록(G)" else "빨강(R)",
+            hint = "신호 좋은 색 자동선택")
+        MetricRow("안정 구간 수", "${result.hrWindowsUsed}개", hint = "많을수록 robust")
         HorizontalDivider()
 
         // Detailed interpretation.

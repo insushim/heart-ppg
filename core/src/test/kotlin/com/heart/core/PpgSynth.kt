@@ -98,6 +98,56 @@ object PpgSynth {
         return beats
     }
 
+    /** Dual-channel stream (shared timestamps/beats, independent noise + per-channel amplitude). */
+    fun buildDual(
+        beatTimes: List<Double>,
+        fs: Double = 30.0,
+        durationSec: Double,
+        dcRed: Double = 150.0,
+        acRed: Double = 3.0,
+        dcGreen: Double = 150.0,
+        acGreen: Double = 3.0,
+        noiseStd: Double = 0.2,
+        seed: Long = 42L,
+    ): List<com.heart.core.model.DualPpgSample> {
+        val rng = Random(seed)
+        val n = (durationSec * fs).toInt()
+        val out = ArrayList<com.heart.core.model.DualPpgSample>(n)
+        for (i in 0 until n) {
+            val t = i / fs
+            var ac = 0.0
+            for (tb in beatTimes) {
+                val d = t - tb
+                if (d < -0.3) break
+                if (d > 0.5) continue
+                ac += pulse(d)
+            }
+            val red = dcRed + acRed * ac + noiseStd * rng.nextGaussian()
+            val green = dcGreen + acGreen * ac + noiseStd * rng.nextGaussian()
+            val tMs = (t * 1000.0 + 3.0 * (rng.nextDouble() - 0.5)).toLong()
+            out.add(com.heart.core.model.DualPpgSample(tMs, red, green))
+        }
+        return out
+    }
+
+    /** Corrupt a time span [fromSec,toSec) with strong additive noise (simulates motion). */
+    fun corrupt(
+        samples: List<PpgSample>,
+        fromSec: Double,
+        toSec: Double,
+        noiseStd: Double = 15.0,
+        seed: Long = 99L,
+    ): List<PpgSample> {
+        if (samples.isEmpty()) return samples
+        val rng = Random(seed)
+        val t0 = samples.first().timeMs
+        return samples.map { s ->
+            val rel = (s.timeMs - t0) / 1000.0
+            if (rel in fromSec..toSec) PpgSample(s.timeMs, s.value + noiseStd * rng.nextGaussian())
+            else s
+        }
+    }
+
     /** Beat times from an explicit IBI list (ms). Returns Pair(beatTimes, cumulativeStart). */
     fun beatsFromIbis(ibisMs: List<Double>, startSec: Double = 0.5): List<Double> {
         val beats = ArrayList<Double>(ibisMs.size + 1)

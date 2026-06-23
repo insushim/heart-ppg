@@ -34,4 +34,11 @@ data class MeasurementResult(
     val respirationBpm: Double? = null,
     /** True when beat-to-beat intervals look irregular (AFib *screening* hint, not a diagnosis). */
     val irregularRhythm: Boolean = false,
+    /** Which colour channel was used ("RED" / "GREEN") — adaptive per measurement. */
+    val channel: String = "RED",
+    /** How many sliding windows contributed to the final HR (higher = more robust). */
+    val hrWindowsUsed: Int = 0,
 )
+
+/** A PPG sample carrying both red and green channel means (for adaptive channel choice). */
+data class DualPpgSample(val timeMs: Long, val red: Double, val green: Double)

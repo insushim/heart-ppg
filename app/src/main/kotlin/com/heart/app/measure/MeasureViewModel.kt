@@ -6,8 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.heart.app.HeartApp
 import com.heart.app.data.toEntity
 import com.heart.core.PpgAnalyzer
+import com.heart.core.model.DualPpgSample
 import com.heart.core.model.MeasurementResult
-import com.heart.core.model.PpgSample
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -28,6 +28,8 @@ data class MeasureUiState(
     val waveform: List<Float> = emptyList(),
     val result: MeasurementResult? = null,
     val insufficientReason: String? = null,
+    /** Live provisional heart rate shown during measurement (null until enough data). */
+    val liveBpm: Int? = null,
     // Diagnostics (visible on screen) — frames seen, latest red intensity, camera error.
     val frames: Int = 0,
     val lastRed: Double = 0.0,
@@ -59,7 +61,7 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
     val completed: SharedFlow<MeasurementResult> = _completed.asSharedFlow()
 
     private val lock = Any()
-    private val samples = ArrayList<PpgSample>(2048)
+    private val samples = ArrayList<DualPpgSample>(2048)
     private val wave = ArrayDeque<Float>(WAVE_LEN)
     private var phaseStartMs = 0L
     private var measureStartMs = 0L
@@ -67,6 +69,8 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
     private var frameCount = 0
     private var lastRed = 0.0
     private var lastPresent = false
+    private var lastLiveFrame = 0
+    @Volatile private var liveBusy = false
     // Monotonic session id: bumped on reset so a late-finishing analysis from a previous
     // session cannot overwrite the new state (4-way review: reset/analysis race).
     private val session = AtomicInteger(0)
@@ -88,6 +92,8 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
             frameCount = 0
             lastRed = 0.0
             lastPresent = false
+            lastLiveFrame = 0
+            liveBusy = false
             // Assign state inside the lock so a concurrent onSample can't observe a
             // half-reset (cleared fields but stale phase) — local-validator C1.
             _state.value = MeasureUiState()
@@ -95,9 +101,10 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Called from the camera analyzer thread for every frame. */
-    fun onSample(tMs: Long, red: Double, fingerPresent: Boolean) {
-        var snapshot: List<PpgSample>? = null
+    fun onSample(tMs: Long, red: Double, green: Double, fingerPresent: Boolean) {
+        var snapshot: List<DualPpgSample>? = null
         var snapshotSession = -1
+        var liveSnapshot: List<DualPpgSample>? = null
         synchronized(lock) {
             val phase = _state.value.phase
             if (phase == MeasurePhase.ANALYZING || phase == MeasurePhase.RESULT ||
@@ -113,7 +120,7 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
                     if (fingerPresent) {
                         samples.clear()
                         phaseStartMs = tMs
-                        samples.add(PpgSample(tMs, red))
+                        samples.add(DualPpgSample(tMs, red, green))
                         pushWave(red)
                         emit(MeasurePhase.WARMUP, 0f)
                     } else {
@@ -129,7 +136,7 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
                     } else {
                         // Keep warmup samples: the core (PpgAnalyzer) trims its own 2 s
                         // warmup, so feeding warmup+measure yields the intended window.
-                        samples.add(PpgSample(tMs, red))
+                        samples.add(DualPpgSample(tMs, red, green))
                         pushWave(red)
                         if (tMs - phaseStartMs >= WARMUP_MS) {
                             measureStartMs = tMs
@@ -145,7 +152,7 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
                         samples.clear()
                         emit(MeasurePhase.WAITING_FINGER, 0f)
                     } else {
-                        samples.add(PpgSample(tMs, red))
+                        samples.add(DualPpgSample(tMs, red, green))
                         pushWave(red)
                         val elapsed = tMs - measureStartMs
                         val p = (elapsed.toFloat() / MEASURE_MS).coerceIn(0f, 1f)
@@ -155,6 +162,14 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
                             emit(MeasurePhase.ANALYZING, 1f)
                         } else {
                             emit(MeasurePhase.MEASURING, p)
+                            // Live provisional HR every ~3 s once enough data is collected.
+                            if (!liveBusy && frameCount - lastLiveFrame >= 90 &&
+                                samples.size >= (PpgAnalyzer.MIN_SECONDS * 30).toInt()
+                            ) {
+                                lastLiveFrame = frameCount
+                                liveBusy = true
+                                liveSnapshot = ArrayList(samples)
+                            }
                         }
                     }
                 }
@@ -164,11 +179,23 @@ class MeasureViewModel(app: Application) : AndroidViewModel(app) {
 
         val data = snapshot
         if (data != null) runAnalysis(data, snapshotSession)
+        val live = liveSnapshot
+        if (live != null) runLiveEstimate(live)
     }
 
-    private fun runAnalysis(data: List<PpgSample>, forSession: Int) {
+    private fun runLiveEstimate(data: List<DualPpgSample>) {
+        viewModelScope.launch(Dispatchers.Default) {
+            val a = PpgAnalyzer.analyzeDual(data)
+            if (a is PpgAnalyzer.Analysis.Ok && _state.value.phase == MeasurePhase.MEASURING) {
+                _state.value = _state.value.copy(liveBpm = a.result.bpm.toInt())
+            }
+            liveBusy = false
+        }
+    }
+
+    private fun runAnalysis(data: List<DualPpgSample>, forSession: Int) {
         analysisJob = viewModelScope.launch(Dispatchers.Default) {
-            val analysis = PpgAnalyzer.analyze(data)
+            val analysis = PpgAnalyzer.analyzeDual(data)
             if (forSession != session.get()) return@launch // superseded by a reset
             when (analysis) {
                 is PpgAnalyzer.Analysis.Ok -> {

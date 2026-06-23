@@ -5,7 +5,9 @@ import android.content.pm.PackageManager
 import android.hardware.camera2.CaptureRequest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.util.Range
 import androidx.camera.camera2.interop.Camera2CameraControl
+import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
@@ -103,10 +105,20 @@ fun MeasureScreen(onResult: (MeasurementResult) -> Unit, onCancel: () -> Unit) {
                 runCatching {
                     val provider = future.get()
                     boundProvider = provider
-                    val analysis = ImageAnalysis.Builder()
+                    val analysisBuilder = ImageAnalysis.Builder()
                         .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                        .build()
+                    // Keep capture at a steady ≥20 fps for good temporal resolution. A range
+                    // (not a hard lock) lets the HAL clamp on devices that can't sustain it,
+                    // and the torch keeps the scene bright so exposure isn't light-starved.
+                    runCatching {
+                        Camera2Interop.Extender(analysisBuilder)
+                            .setCaptureRequestOption(
+                                android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                                Range(20, 30),
+                            )
+                    }
+                    val analysis = analysisBuilder.build()
                     analysis.setAnalyzer(executor, RedChannelAnalyzer(vm::onSample))
                     val preview = Preview.Builder().build().also {
                         it.setSurfaceProvider(previewView.surfaceProvider)
@@ -236,6 +248,16 @@ fun MeasureScreen(onResult: (MeasurementResult) -> Unit, onCancel: () -> Unit) {
             color = if (ui.phase == MeasurePhase.INSUFFICIENT) MaterialTheme.colorScheme.error
             else MaterialTheme.colorScheme.onSurface,
         )
+
+        // Live provisional heart rate during measurement.
+        if (ui.phase == MeasurePhase.MEASURING && ui.liveBpm != null) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "현재 약 ${ui.liveBpm} bpm (측정 중)",
+                fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
 
         ui.error?.let { err ->
             Spacer(Modifier.height(12.dp))

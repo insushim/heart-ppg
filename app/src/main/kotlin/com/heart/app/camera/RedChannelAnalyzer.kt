@@ -4,14 +4,14 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 
 /**
- * Extracts the mean red-channel intensity over a centered ROI from each RGBA_8888 frame.
- * With the torch on and a fingertip covering the lens, the red channel carries the
- * strongest pulsatile (PPG) component.
+ * Extracts the mean red AND green channel intensities over a centered ROI from each
+ * RGBA_8888 frame. Both channels are reported so the analyzer can adaptively pick the
+ * one with the stronger pulsatile (PPG) signal for this measurement.
  *
- * @param onSample (timestampMs, meanRed[0..255], fingerPresent)
+ * @param onSample (timestampMs, meanRed[0..255], meanGreen[0..255], fingerPresent)
  */
 class RedChannelAnalyzer(
-    private val onSample: (Long, Double, Boolean) -> Unit,
+    private val onSample: (Long, Double, Double, Boolean) -> Unit,
 ) : ImageAnalysis.Analyzer {
 
     override fun analyze(image: ImageProxy) {
@@ -33,6 +33,7 @@ class RedChannelAnalyzer(
             val y1 = height * 3 / 4
 
             var sumR = 0L
+            var sumG = 0L
             var count = 0L
             var y = y0
             while (y < y1) {
@@ -40,9 +41,9 @@ class RedChannelAnalyzer(
                 var x = x0
                 while (x < x1) {
                     val idx = rowStart + x * pixelStride
-                    if (idx in 0 until buffer.limit()) {
-                        val r = buffer.get(idx).toInt() and 0xFF
-                        sumR += r
+                    if (idx + 1 in 0 until buffer.limit()) {
+                        sumR += buffer.get(idx).toInt() and 0xFF       // R = byte 0
+                        sumG += buffer.get(idx + 1).toInt() and 0xFF   // G = byte 1
                         count++
                     }
                     x += 2
@@ -51,12 +52,13 @@ class RedChannelAnalyzer(
             }
 
             val meanR = if (count > 0) sumR.toDouble() / count else 0.0
+            val meanG = if (count > 0) sumG.toDouble() / count else 0.0
             // Finger present ⇒ the torch-lit fingertip makes the red channel bright.
             // No upper cap: a tightly pressed finger can saturate red near 255, which
             // must still count as "present" (earlier 252 cap wrongly rejected it).
             val present = meanR > 60.0
             val tMs = image.imageInfo.timestamp / 1_000_000L
-            onSample(tMs, meanR, present)
+            onSample(tMs, meanR, meanG, present)
         } catch (_: Throwable) {
             // Never let a bad frame crash the analysis pipeline.
         } finally {
